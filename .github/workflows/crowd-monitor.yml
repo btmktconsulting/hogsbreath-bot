@@ -1,0 +1,54 @@
+name: Crowd Monitor
+
+on:
+  schedule:
+    # Every 15 minutes during bar hours (12 PM - 1 AM ET)
+    # Covers both EDT (UTC-4) and EST (UTC-5) offsets
+    - cron: '*/15 16-23,0-6 * * *'
+  workflow_dispatch:
+    inputs:
+      test:
+        description: 'Send test notification with current count'
+        type: boolean
+        default: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Cache YOLO model
+        uses: actions/cache@v4
+        with:
+          path: yolov8n.pt
+          key: yolov8n-model
+
+      - name: Install dependencies
+        run: pip install requests ultralytics yt-dlp
+
+      - name: Restore crowd state
+        uses: actions/cache/restore@v4
+        with:
+          path: crowd_state.json
+          key: crowd-state-${{ github.run_id }}
+          restore-keys: |
+            crowd-state-
+
+      - name: Check crowd level
+        env:
+          CROWD_DISCORD_WEBHOOK: ${{ secrets.CROWD_DISCORD_WEBHOOK }}
+        run: python crowd_monitor.py ${{ github.event.inputs.test == 'true' && '--test' || '' }}
+
+      - name: Save crowd state
+        uses: actions/cache/save@v4
+        with:
+          path: crowd_state.json
+          key: crowd-state-${{ github.run_id }}
