@@ -9,6 +9,7 @@ import re
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
+import cloudscraper
 import requests
 from bs4 import BeautifulSoup
 
@@ -16,15 +17,7 @@ URL = "https://www.hogsbreath.com/events/"
 WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL", "")
 TIMEZONE = ZoneInfo("America/New_York")
 
-HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/120.0.0.0 Safari/537.36"
-    ),
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-    "Accept-Language": "en-US,en;q=0.5",
-}
+SCRAPER = cloudscraper.create_scraper()
 
 MONTHS = {
     "Jan": 1, "Feb": 2, "Mar": 3, "Apr": 4, "May": 5, "Jun": 6,
@@ -37,7 +30,7 @@ MONTHS = {
 
 def fetch_todays_events():
     """Scrape the events page and return today's performances."""
-    resp = requests.get(URL, headers=HEADERS, timeout=20)
+    resp = SCRAPER.get(URL, timeout=20)
     resp.raise_for_status()
     soup = BeautifulSoup(resp.text, "html.parser")
 
