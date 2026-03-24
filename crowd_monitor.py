@@ -52,7 +52,7 @@ def grab_frame():
         page.goto(embed_url, wait_until="domcontentloaded", timeout=30000)
 
         # Wait for video to load and start playing
-        page.wait_for_timeout(10000)
+        page.wait_for_timeout(15000)
 
         # Take a full-page screenshot (the embed IS the video)
         page.screenshot(path=FRAME_PATH)
