@@ -1,23 +1,23 @@
 """
 Hog's Breath Saloon → Discord crowd monitor
-Grabs a frame from the YouTube livestream, counts people using YOLOv8,
+Screenshots the YouTube livestream via Playwright, counts people using YOLOv8,
 and sends a Discord notification when the bar gets busy (10+ people).
 Runs as a GitHub Actions scheduled workflow every 15 minutes during bar hours.
 """
 
 import json
 import os
-import subprocess
 import sys
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
 import requests
+from playwright.sync_api import sync_playwright
 from ultralytics import YOLO
 
 YOUTUBE_URL = "https://www.youtube.com/watch?v=YWs0HMRVCBY"
 WEBHOOK_URL = os.environ.get("CROWD_DISCORD_WEBHOOK", "")
-FRAME_PATH = "/tmp/bar_frame.jpg"
+FRAME_PATH = "/tmp/bar_frame.png"
 STATE_FILE = "crowd_state.json"
 THRESHOLD = 10
 TIMEZONE = ZoneInfo("America/New_York")
@@ -31,45 +31,52 @@ def is_bar_hours():
     """Check if it's currently bar hours in ET."""
     now = datetime.now(TIMEZONE)
     hour = now.hour
-    # 12 PM (12) through midnight (23) and midnight through 1 AM (0-1)
     return hour >= BAR_OPEN_HOUR or hour < BAR_CLOSE_HOUR
 
 
 def grab_frame():
-    """Grab a single frame from the YouTube livestream."""
+    """Screenshot the YouTube livestream using a headless browser."""
     if os.path.exists(FRAME_PATH):
         os.remove(FRAME_PATH)
 
-    # Step 1: Get the direct stream URL from yt-dlp
-    # Try multiple format options in case some aren't available
-    for fmt in ["best[height<=480]", "worst", "best"]:
-        result = subprocess.run(
-            ["yt-dlp", "-f", fmt, "--get-url", YOUTUBE_URL],
-            capture_output=True, text=True, timeout=30,
-        )
-        stream_url = result.stdout.strip()
-        if stream_url and stream_url.startswith("http"):
-            print(f"[OK] Got stream URL (format: {fmt})")
-            break
-        print(f"[WARN] Format '{fmt}' failed: {result.stderr.strip()[:200]}")
-    else:
-        raise RuntimeError(f"Could not get stream URL with any format")
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        page = browser.new_page(viewport={"width": 1280, "height": 720})
 
-    # Step 2: Grab one frame with ffmpeg (timeout to prevent hanging on HLS)
-    result = subprocess.run(
-        [
-            "timeout", "30",
-            "ffmpeg", "-y",
-            "-i", stream_url,
-            "-frames:v", "1", "-q:v", "2",
-            "-loglevel", "error",
-            FRAME_PATH,
-        ],
-        capture_output=True, text=True, timeout=45,
-    )
+        # Navigate to the livestream
+        page.goto(YOUTUBE_URL, wait_until="domcontentloaded", timeout=30000)
+
+        # Dismiss cookie/consent dialogs if present
+        try:
+            page.click("button[aria-label='Accept all']", timeout=3000)
+        except Exception:
+            pass
+
+        # Click the video to start playback and wait for it to load
+        try:
+            page.click("video", timeout=5000)
+        except Exception:
+            pass
+
+        # Wait for video to start playing
+        page.wait_for_timeout(8000)
+
+        # Screenshot just the video player area
+        video = page.query_selector("video")
+        if video:
+            video.screenshot(path=FRAME_PATH)
+        else:
+            # Fallback: screenshot the main player container
+            player = page.query_selector("#movie_player")
+            if player:
+                player.screenshot(path=FRAME_PATH)
+            else:
+                page.screenshot(path=FRAME_PATH)
+
+        browser.close()
 
     if not os.path.exists(FRAME_PATH) or os.path.getsize(FRAME_PATH) == 0:
-        raise RuntimeError(f"ffmpeg failed: {result.stderr}")
+        raise RuntimeError("Failed to capture screenshot")
 
     print(f"[OK] Captured frame: {os.path.getsize(FRAME_PATH)} bytes")
 

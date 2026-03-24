@@ -31,17 +31,10 @@ jobs:
           path: yolov8n.pt
           key: yolov8n-model
 
-      - name: Install Deno (for yt-dlp YouTube extraction)
-        uses: denoland/setup-deno@v2
-        with:
-          deno-version: v2.x
-
       - name: Install dependencies
         run: |
-          sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg > /dev/null
-          pip install requests ultralytics yt-dlp
-          echo "deno: $(deno --version | head -1)"
-          echo "ffmpeg: $(ffmpeg -version 2>&1 | head -1)"
+          pip install requests ultralytics playwright
+          playwright install chromium --with-deps
 
       - name: Restore crowd state
         uses: actions/cache/restore@v4
