@@ -47,7 +47,7 @@ jobs:
       - name: Check crowd level
         env:
           CROWD_DISCORD_WEBHOOK: ${{ secrets.CROWD_DISCORD_WEBHOOK }}
-        run: python crowd_monitor.py ${{ github.event.inputs.test == 'true' && '--test' || '' }}
+        run: xvfb-run python crowd_monitor.py ${{ github.event.inputs.test == 'true' && '--test' || '' }}
 
       - name: Upload debug screenshot
         if: always()
