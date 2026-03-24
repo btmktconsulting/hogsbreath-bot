@@ -45,17 +45,46 @@ def grab_frame():
     with sync_playwright() as p:
         browser = p.chromium.launch(
             headless=True,
-            args=["--autoplay-policy=no-user-gesture-required"],
+            args=[
+                "--autoplay-policy=no-user-gesture-required",
+                "--disable-blink-features=AutomationControlled",
+                "--disable-features=IsolateOrigins,site-per-process",
+            ],
         )
-        page = browser.new_page(viewport={"width": 1280, "height": 720})
+        context = browser.new_context(
+            viewport={"width": 1280, "height": 720},
+            user_agent=(
+                "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+                "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            ),
+        )
+        page = context.new_page()
 
-        page.goto(embed_url, wait_until="domcontentloaded", timeout=30000)
+        # Hide webdriver flag
+        page.add_init_script("""
+            Object.defineProperty(navigator, 'webdriver', { get: () => false });
+        """)
+
+        page.goto(embed_url, wait_until="networkidle", timeout=30000)
 
         # Wait for video to load and start playing
         page.wait_for_timeout(15000)
 
         # Take a full-page screenshot (the embed IS the video)
         page.screenshot(path=FRAME_PATH)
+        frame_size = os.path.getsize(FRAME_PATH)
+
+        # If frame is too small (<50KB), the video likely didn't load
+        # Try clicking play button as fallback
+        if frame_size < 50000:
+            print(f"[WARN] Frame too small ({frame_size} bytes), trying to click play...")
+            try:
+                page.click(".ytp-large-play-button", timeout=3000)
+                page.wait_for_timeout(10000)
+                page.screenshot(path=FRAME_PATH)
+                frame_size = os.path.getsize(FRAME_PATH)
+            except Exception:
+                pass
 
         browser.close()
 
