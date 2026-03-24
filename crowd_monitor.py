@@ -1,8 +1,8 @@
 """
-Hog's Breath Saloon → Discord crowd monitor
+Elbo Room → Discord crowd monitor
 Screenshots the YouTube livestream via Playwright, counts people using YOLOv8,
 and sends a Discord notification when the bar gets busy (10+ people).
-Runs as a GitHub Actions scheduled workflow every 15 minutes during bar hours.
+Runs locally via launchd (macOS) every 15 minutes during bar hours.
 """
 
 import json
@@ -18,7 +18,7 @@ from ultralytics import YOLO
 YOUTUBE_URL = "https://www.youtube.com/watch?v=YWs0HMRVCBY"
 WEBHOOK_URL = os.environ.get("CROWD_DISCORD_WEBHOOK", "")
 FRAME_PATH = "/tmp/bar_frame.png"
-STATE_FILE = "crowd_state.json"
+STATE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "crowd_state.json")
 THRESHOLD = 10
 TIMEZONE = ZoneInfo("America/New_York")
 
@@ -35,77 +35,32 @@ def is_bar_hours():
 
 
 def grab_frame():
-    """Screenshot the YouTube livestream using a headless browser."""
+    """Screenshot the YouTube livestream video player."""
     if os.path.exists(FRAME_PATH):
         os.remove(FRAME_PATH)
-
-    # Use embed URL — auto-plays without consent dialogs
-    embed_url = YOUTUBE_URL.replace("watch?v=", "embed/") + "?autoplay=1&mute=1"
 
     with sync_playwright() as p:
         browser = p.chromium.launch(
             headless=False,
+            channel="chrome",
             args=[
                 "--autoplay-policy=no-user-gesture-required",
-                "--disable-blink-features=AutomationControlled",
-                "--disable-features=IsolateOrigins,site-per-process",
+                "--mute-audio",
             ],
         )
-        context = browser.new_context(
-            viewport={"width": 1280, "height": 720},
-            user_agent=(
-                "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
-                "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-            ),
-        )
-        page = context.new_page()
+        page = browser.new_page(viewport={"width": 1280, "height": 720})
 
-        # Hide webdriver flag
-        page.add_init_script("""
-            Object.defineProperty(navigator, 'webdriver', { get: () => false });
-        """)
-
-        page.goto(embed_url, wait_until="networkidle", timeout=30000)
-
-        # Debug: check page title and video state
-        title = page.title()
-        print(f"[DEBUG] Page title: {title}")
-
-        # Try to check video state
-        video_state = page.evaluate("""() => {
-            const v = document.querySelector('video');
-            if (!v) return 'no video element';
-            return {
-                paused: v.paused,
-                readyState: v.readyState,
-                currentTime: v.currentTime,
-                src: v.src ? v.src.substring(0, 80) : 'none',
-                width: v.videoWidth,
-                height: v.videoHeight,
-            };
-        }""")
-        print(f"[DEBUG] Video state: {video_state}")
-
-        # Try clicking play if paused
-        try:
-            page.click(".ytp-large-play-button", timeout=3000)
-            print("[DEBUG] Clicked play button")
-        except Exception:
-            print("[DEBUG] No play button found (may already be playing)")
+        page.goto(YOUTUBE_URL, wait_until="domcontentloaded", timeout=30000)
 
         # Wait for video to load and start playing
-        page.wait_for_timeout(15000)
+        page.wait_for_timeout(8000)
 
-        # Check state again after wait
-        video_state2 = page.evaluate("""() => {
-            const v = document.querySelector('video');
-            if (!v) return 'no video element';
-            return { paused: v.paused, readyState: v.readyState, currentTime: v.currentTime };
-        }""")
-        print(f"[DEBUG] Video state after wait: {video_state2}")
-
-        # Take a full-page screenshot (the embed IS the video)
-        page.screenshot(path=FRAME_PATH)
+        # Screenshot just the video player
+        player = page.query_selector("#movie_player")
+        if player:
+            player.screenshot(path=FRAME_PATH)
+        else:
+            page.screenshot(path=FRAME_PATH)
 
         browser.close()
 
@@ -144,14 +99,14 @@ def save_state(state):
 def send_discord(count, busy=True):
     """Send a Discord notification about crowd level."""
     if busy:
-        title = "🍺 Hog's Breath is Busy!"
+        title = "🍺 Elbo Room is Busy!"
         description = (
             f"**~{count} people** spotted on camera\n\n"
             f"📺 Watch: {YOUTUBE_URL}"
         )
         color = 16749568  # orange
     else:
-        title = "🍺 Hog's Breath Has Quieted Down"
+        title = "🍺 Elbo Room Has Quieted Down"
         description = (
             f"**~{count} people** on camera now\n\n"
             f"📺 Watch: {YOUTUBE_URL}"
@@ -164,7 +119,7 @@ def send_discord(count, busy=True):
                 "title": title,
                 "description": description,
                 "color": color,
-                "footer": {"text": "Hog's Breath Saloon • Crowd Monitor"},
+                "footer": {"text": "Elbo Room • Crowd Monitor"},
             }
         ]
     }
