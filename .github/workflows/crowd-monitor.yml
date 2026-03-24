@@ -49,6 +49,14 @@ jobs:
           CROWD_DISCORD_WEBHOOK: ${{ secrets.CROWD_DISCORD_WEBHOOK }}
         run: python crowd_monitor.py ${{ github.event.inputs.test == 'true' && '--test' || '' }}
 
+      - name: Upload debug screenshot
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: screenshot
+          path: /tmp/bar_frame.png
+          retention-days: 1
+
       - name: Save crowd state
         uses: actions/cache/save@v4
         with:

@@ -67,24 +67,45 @@ def grab_frame():
 
         page.goto(embed_url, wait_until="networkidle", timeout=30000)
 
+        # Debug: check page title and video state
+        title = page.title()
+        print(f"[DEBUG] Page title: {title}")
+
+        # Try to check video state
+        video_state = page.evaluate("""() => {
+            const v = document.querySelector('video');
+            if (!v) return 'no video element';
+            return {
+                paused: v.paused,
+                readyState: v.readyState,
+                currentTime: v.currentTime,
+                src: v.src ? v.src.substring(0, 80) : 'none',
+                width: v.videoWidth,
+                height: v.videoHeight,
+            };
+        }""")
+        print(f"[DEBUG] Video state: {video_state}")
+
+        # Try clicking play if paused
+        try:
+            page.click(".ytp-large-play-button", timeout=3000)
+            print("[DEBUG] Clicked play button")
+        except Exception:
+            print("[DEBUG] No play button found (may already be playing)")
+
         # Wait for video to load and start playing
         page.wait_for_timeout(15000)
 
+        # Check state again after wait
+        video_state2 = page.evaluate("""() => {
+            const v = document.querySelector('video');
+            if (!v) return 'no video element';
+            return { paused: v.paused, readyState: v.readyState, currentTime: v.currentTime };
+        }""")
+        print(f"[DEBUG] Video state after wait: {video_state2}")
+
         # Take a full-page screenshot (the embed IS the video)
         page.screenshot(path=FRAME_PATH)
-        frame_size = os.path.getsize(FRAME_PATH)
-
-        # If frame is too small (<50KB), the video likely didn't load
-        # Try clicking play button as fallback
-        if frame_size < 50000:
-            print(f"[WARN] Frame too small ({frame_size} bytes), trying to click play...")
-            try:
-                page.click(".ytp-large-play-button", timeout=3000)
-                page.wait_for_timeout(10000)
-                page.screenshot(path=FRAME_PATH)
-                frame_size = os.path.getsize(FRAME_PATH)
-            except Exception:
-                pass
 
         browser.close()
 
