@@ -1,7 +1,7 @@
 """
 Elbo Room → Discord crowd monitor
 Screenshots the YouTube livestream via Playwright, counts people using YOLOv8,
-detects gender ratio with DeepFace, and sends tiered Discord notifications.
+detects gender ratio with CLIP (full-body cues), and sends tiered Discord notifications.
 Runs locally via launchd (macOS) every 15 minutes during bar hours.
 """
 
@@ -12,10 +12,11 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 import cv2
-import numpy as np
 import requests
-from deepface import DeepFace
+import torch
+from PIL import Image
 from playwright.sync_api import sync_playwright
+from transformers import CLIPModel, CLIPProcessor
 from ultralytics import YOLO
 
 YOUTUBE_URL = "https://www.youtube.com/watch?v=YWs0HMRVCBY"
@@ -107,9 +108,9 @@ def grab_frame():
 
 
 def count_and_analyze():
-    """Run YOLOv8 to count people, then DeepFace for gender on each crop."""
-    model = YOLO("yolov8n.pt")
-    results = model(FRAME_PATH, verbose=False)
+    """Run YOLOv8 to count people, then CLIP for gender on each full-body crop."""
+    yolo = YOLO("yolov8n.pt")
+    results = yolo(FRAME_PATH, verbose=False)
     img = cv2.imread(FRAME_PATH)
 
     people_boxes = []
@@ -119,41 +120,47 @@ def count_and_analyze():
                 people_boxes.append(box.xyxy[0].cpu().numpy())
 
     count = len(people_boxes)
+    if count == 0:
+        return 0, 0, 0
+
+    # Load CLIP model for full-body gender classification
+    clip_model = CLIPModel.from_pretrained("openai/clip-vit-base-patch32")
+    clip_processor = CLIPProcessor.from_pretrained("openai/clip-vit-base-patch32")
+    labels = ["a man", "a woman"]
+
     men = 0
     women = 0
 
     for box in people_boxes:
         x1, y1, x2, y2 = map(int, box)
-        # Pad the crop slightly for better face detection
         h, w = img.shape[:2]
-        x1 = max(0, x1 - 10)
-        y1 = max(0, y1 - 10)
-        x2 = min(w, x2 + 10)
-        y2 = min(h, y2 + 10)
+        x1 = max(0, x1 - 5)
+        y1 = max(0, y1 - 5)
+        x2 = min(w, x2 + 5)
+        y2 = min(h, y2 + 5)
         crop = img[y1:y2, x1:x2]
 
         if crop.size == 0:
             continue
 
         try:
-            analysis = DeepFace.analyze(
-                crop, actions=["gender"], enforce_detection=False, silent=True
+            # Convert BGR (OpenCV) to RGB PIL image
+            crop_rgb = cv2.cvtColor(crop, cv2.COLOR_BGR2RGB)
+            crop_pil = Image.fromarray(crop_rgb)
+
+            inputs = clip_processor(
+                text=labels, images=crop_pil, return_tensors="pt", padding=True
             )
-            if isinstance(analysis, list):
-                analysis = analysis[0]
-            dominant = analysis.get("dominant_gender", "")
-            if dominant == "Man":
+            with torch.no_grad():
+                outputs = clip_model(**inputs)
+            probs = outputs.logits_per_image.softmax(dim=1)[0]
+
+            if probs[0] > probs[1]:
                 men += 1
-            elif dominant == "Woman":
+            else:
                 women += 1
         except Exception:
-            pass  # Skip if face can't be analyzed
-
-    # Anyone not classified gets split evenly (rough estimate)
-    unclassified = count - men - women
-    if unclassified > 0:
-        men += unclassified // 2
-        women += unclassified - (unclassified // 2)
+            men += 1  # Default to man if classification fails
 
     return count, men, women
 
