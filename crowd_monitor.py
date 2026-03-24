@@ -48,6 +48,7 @@ def grab_frame():
     result = subprocess.run(
         [
             "yt-dlp", "-f", "best[height<=480]",
+            "--js-runtimes", "nodejs,deno",
             "--downloader", "ffmpeg",
             "--downloader-args", "ffmpeg:-t 3",
             "-o", clip_path,
