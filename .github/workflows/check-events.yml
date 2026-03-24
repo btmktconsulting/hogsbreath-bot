@@ -1,0 +1,31 @@
+name: Check Hog's Breath Events
+
+on:
+  schedule:
+    # 1 minute before each show slot (12 PM, 4:30 PM, 9 PM ET)
+    # Runs at both EDT and EST UTC offsets so it works year-round
+    - cron: '59 15,16 * * *'   # 11:59 AM ET (EDT=15:59, EST=16:59)
+    - cron: '29 20,21 * * *'   # 4:29 PM ET  (EDT=20:29, EST=21:29)
+    - cron: '59 0,1 * * *'     # 8:59 PM ET  (EDT=00:59, EST=01:59)
+  workflow_dispatch: # Allow manual trigger
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Check for upcoming performances
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: python main.py

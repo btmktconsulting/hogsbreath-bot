@@ -1,7 +1,11 @@
-import json
+"""
+Hog's Breath Saloon → Discord live performer notifier
+Scrapes the events page and sends a Discord alert ~1 minute before each performance.
+Runs as a GitHub Actions scheduled workflow at show times (12 PM, 4:30 PM, 9 PM ET).
+"""
+
 import os
 import re
-import time
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -9,166 +13,141 @@ import requests
 from bs4 import BeautifulSoup
 
 URL = "https://www.hogsbreath.com/events/"
-WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL", "https://discord.com/api/webhooks/1484607609024811020/oOXPvAMe07M1CKg2vTwbFhqIbEzrirXp-IIOf2FhQ5ZDHhMrhj3QvNIi3dxQWKQ5Zp8p")
-STATE_FILE = "/tmp/hogs_state.json"
-TIMEZONE = "America/New_York"
-CHECK_INTERVAL_SECONDS = 60
+WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL", "")
+TIMEZONE = ZoneInfo("America/New_York")
 
-HEADERS = {
-    "User-Agent": "Mozilla/5.0"
-}
+HEADERS = {"User-Agent": "Mozilla/5.0"}
 
 MONTHS = {
     "Jan": 1, "Feb": 2, "Mar": 3, "Apr": 4, "May": 5, "Jun": 6,
-    "Jul": 7, "Aug": 8, "Sep": 9, "Oct": 10, "Nov": 11, "Dec": 12
+    "Jul": 7, "Aug": 8, "Sep": 9, "Oct": 10, "Nov": 11, "Dec": 12,
+    "January": 1, "February": 2, "March": 3, "April": 4, "May": 5,
+    "June": 6, "July": 7, "August": 8, "September": 9, "October": 10,
+    "November": 11, "December": 12,
 }
 
-EVENT_RE = re.compile(
-    r'(?P<mon>[A-Z][a-z]{2})\s+'
-    r'(?P<day>\d{2})\s+'
-    r'(?P<artist>.*?)\s+'
-    r'(?:[A-Za-z]+\s+\d{1,2})\s+@\s+\(\s*'
-    r'(?P<start>\d{1,2}:\d{2}\s*[AP]M)\s*-\s*'
-    r'(?P<end>\d{1,2}:\d{2}\s*[AP]M)\s*\)'
-)
 
-def load_state():
-    if os.path.exists(STATE_FILE):
-        with open(STATE_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
-    return {}
+def fetch_todays_events():
+    """Scrape the events page and return today's performances."""
+    resp = requests.get(URL, headers=HEADERS, timeout=20)
+    resp.raise_for_status()
+    soup = BeautifulSoup(resp.text, "html.parser")
 
-def save_state(state):
-    with open(STATE_FILE, "w", encoding="utf-8") as f:
-        json.dump(state, f)
-
-def parse_time(date_obj, time_str, tz):
-    dt = datetime.strptime(time_str.replace(" ", ""), "%I:%M%p")
-    return datetime(
-        year=date_obj.year,
-        month=date_obj.month,
-        day=date_obj.day,
-        hour=dt.hour,
-        minute=dt.minute,
-        tzinfo=tz
-    )
-
-def fetch_events():
-    r = requests.get(URL, headers=HEADERS, timeout=20)
-    r.raise_for_status()
-    soup = BeautifulSoup(r.text, "html.parser")
-
-    tz = ZoneInfo(TIMEZONE)
-    year = datetime.now(tz).year
+    now = datetime.now(TIMEZONE)
+    today = now.date()
+    year = now.year
     events = []
 
-    link_texts = []
     for a in soup.find_all("a"):
-        txt = " ".join(a.get_text(" ", strip=True).split())
-        if txt:
-            link_texts.append(txt)
-
-    for text in link_texts:
+        text = " ".join(a.get_text(" ", strip=True).split())
         if "@" not in text or ("AM" not in text and "PM" not in text):
             continue
 
-        m = EVENT_RE.search(text)
-        if not m:
+        h4 = a.find("h4")
+        if not h4:
+            continue
+        artist = h4.get_text(strip=True)
+
+        # Match time range: "@ ( 12:00 PM - 4:00 PM )" or "@ 12:00 PM - 4:00 PM"
+        time_match = re.search(
+            r"@\s*\(?\s*(\d{1,2}:\d{2}\s*[AP]M)\s*-\s*(\d{1,2}:\d{2}\s*[AP]M)\s*\)?",
+            text,
+        )
+        if not time_match:
             continue
 
-        mon = MONTHS[m.group("mon")]
-        day = int(m.group("day"))
-        artist = m.group("artist").strip()
-        start_str = m.group("start").strip()
-        end_str = m.group("end").strip()
+        # Match date right before the @: "March 24 @" or "Mar 24 @"
+        date_match = re.search(r"(\w+)\s+(\d{1,2})\s+@", text)
+        if not date_match:
+            continue
 
-        event_date = datetime(year, mon, day, tzinfo=tz)
-        start_dt = parse_time(event_date, start_str, tz)
-        end_dt = parse_time(event_date, end_str, tz)
+        month_str = date_match.group(1)
+        day = int(date_match.group(2))
+        if month_str not in MONTHS:
+            continue
+        month = MONTHS[month_str]
 
+        event_date = datetime(year, month, day, tzinfo=TIMEZONE).date()
+        if event_date != today:
+            continue
+
+        start_str = time_match.group(1).strip()
+        end_str = time_match.group(2).strip()
+
+        start_time = datetime.strptime(start_str.replace(" ", ""), "%I:%M%p")
+        end_time = datetime.strptime(end_str.replace(" ", ""), "%I:%M%p")
+
+        start_dt = datetime(
+            year, month, day, start_time.hour, start_time.minute, tzinfo=TIMEZONE
+        )
+        end_dt = datetime(
+            year, month, day, end_time.hour, end_time.minute, tzinfo=TIMEZONE
+        )
         if end_dt <= start_dt:
             end_dt += timedelta(days=1)
 
-        events.append({
-            "artist": artist,
-            "start": start_dt,
-            "end": end_dt,
-        })
+        events.append({"artist": artist, "start": start_dt, "end": end_dt})
 
+    events.sort(key=lambda e: e["start"])
     return events
 
-def next_act(events, now):
-    upcoming = [e for e in events if e["start"] > now]
-    if not upcoming:
-        return None
-    upcoming.sort(key=lambda e: e["start"])
-    return upcoming[0]
 
-def event_starting_now(events, now, grace_minutes=2):
-    candidates = []
-    for e in events:
-        delta_minutes = (now - e["start"]).total_seconds() / 60
-        if 0 <= delta_minutes < grace_minutes:
-            candidates.append(e)
-    if not candidates:
-        return None
-    candidates.sort(key=lambda e: e["start"], reverse=True)
-    return candidates[0]
-
-def send_discord_message(content):
-    r = requests.post(WEBHOOK_URL, json={"content": content}, timeout=20)
-    r.raise_for_status()
-
-def check_and_notify():
-    state = load_state()
-    tz = ZoneInfo(TIMEZONE)
-    now = datetime.now(tz)
-
-    try:
-        events = fetch_events()
-    except Exception as e:
-        print(f"[{now.strftime('%Y-%m-%d %H:%M:%S')}] Error fetching events: {e}")
-        return
-
-    act = event_starting_now(events, now, grace_minutes=2)
-
-    if not act:
-        return
-
-    current_key = f"{act['artist']}|{act['start'].isoformat()}"
-    last_key = state.get("last_start_alert_key")
-
-    if current_key == last_key:
-        return
-
-    upcoming = next_act(events, act["start"])
-
-    msg = (
-        f"🎵 **Now playing at Hog's Breath:** {act['artist']}\n"
-        f"🕒 {act['start'].strftime('%b %d %I:%M %p')} – {act['end'].strftime('%I:%M %p')}"
+def send_discord_notification(event, next_event=None):
+    """Send a Discord embed about an upcoming performance."""
+    description = (
+        f"🕒 {event['start'].strftime('%I:%M %p')} – "
+        f"{event['end'].strftime('%I:%M %p')}"
     )
+    if next_event:
+        description += (
+            f"\n\n➡️ **Up next:** {next_event['artist']} "
+            f"at {next_event['start'].strftime('%I:%M %p')}"
+        )
 
-    if upcoming:
-        msg += f"\n➡️ Next: {upcoming['artist']} at {upcoming['start'].strftime('%I:%M %p')}"
+    payload = {
+        "embeds": [
+            {
+                "title": f"🎵 {event['artist']}",
+                "description": description,
+                "color": 16749568,
+                "footer": {"text": "Hog's Breath Saloon • Live Music"},
+                "url": "https://www.hogsbreath.com/events/",
+            }
+        ]
+    }
 
-    try:
-        send_discord_message(msg)
-        print(f"[{now.strftime('%Y-%m-%d %H:%M:%S')}] Sent alert: {act['artist']}")
-    except Exception as e:
-        print(f"[{now.strftime('%Y-%m-%d %H:%M:%S')}] Error sending Discord message: {e}")
-        return
+    resp = requests.post(WEBHOOK_URL, json=payload, timeout=10)
+    resp.raise_for_status()
+    print(f"[OK] Discord notified: {event['artist']} at {event['start'].strftime('%I:%M %p')}")
 
-    state["last_start_alert_key"] = current_key
-    save_state(state)
 
 def main():
-    print("Hog's Breath Discord bot started. Checking every 60 seconds...")
-    while True:
-        try:
-            check_and_notify()
-        except Exception as e:
-            print(f"Unexpected error: {e}")
-        time.sleep(CHECK_INTERVAL_SECONDS)
+    if not WEBHOOK_URL:
+        print("[ERROR] No DISCORD_WEBHOOK_URL set")
+        return
+
+    now = datetime.now(TIMEZONE)
+    print(f"[CHECK] {now.strftime('%Y-%m-%d %I:%M %p %Z')}")
+
+    events = fetch_todays_events()
+    if not events:
+        print("[OK] No events found for today")
+        return
+
+    print(f"[OK] Found {len(events)} event(s) today:")
+    for e in events:
+        print(f"     {e['artist']} — {e['start'].strftime('%I:%M %p')}")
+
+    # Find events starting within the next 5 minutes
+    for i, event in enumerate(events):
+        minutes_until = (event["start"] - now).total_seconds() / 60
+        if -1 <= minutes_until <= 5:
+            next_event = events[i + 1] if i + 1 < len(events) else None
+            send_discord_notification(event, next_event)
+            return
+
+    print("[OK] No performances starting soon")
+
 
 if __name__ == "__main__":
     main()
