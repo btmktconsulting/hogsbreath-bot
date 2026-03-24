@@ -36,6 +36,12 @@ jobs:
         with:
           deno-version: v2.x
 
+      - name: Verify runtimes
+        run: |
+          which deno && deno --version
+          which node && node --version
+          which ffmpeg && ffmpeg -version | head -1
+
       - name: Install dependencies
         run: pip install requests ultralytics yt-dlp
 
