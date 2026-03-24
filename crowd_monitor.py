@@ -41,14 +41,19 @@ def grab_frame():
         os.remove(FRAME_PATH)
 
     # Step 1: Get the direct stream URL from yt-dlp
-    result = subprocess.run(
-        ["yt-dlp", "-f", "best[height<=480]", "--get-url", YOUTUBE_URL],
-        capture_output=True, text=True, timeout=30,
-    )
-    stream_url = result.stdout.strip()
-    if not stream_url:
-        raise RuntimeError(f"Could not get stream URL: {result.stderr}")
-    print("[OK] Got stream URL")
+    # Try multiple format options in case some aren't available
+    for fmt in ["best[height<=480]", "worst", "best"]:
+        result = subprocess.run(
+            ["yt-dlp", "-f", fmt, "--get-url", YOUTUBE_URL],
+            capture_output=True, text=True, timeout=30,
+        )
+        stream_url = result.stdout.strip()
+        if stream_url and stream_url.startswith("http"):
+            print(f"[OK] Got stream URL (format: {fmt})")
+            break
+        print(f"[WARN] Format '{fmt}' failed: {result.stderr.strip()[:200]}")
+    else:
+        raise RuntimeError(f"Could not get stream URL with any format")
 
     # Step 2: Grab one frame with ffmpeg (timeout to prevent hanging on HLS)
     result = subprocess.run(
