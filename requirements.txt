@@ -1,3 +1,9 @@
 requests
 beautifulsoup4
 cloudscraper
+
+# Elbo Room crowd monitor
+ultralytics
+deepface
+opencv-python-headless
+playwright

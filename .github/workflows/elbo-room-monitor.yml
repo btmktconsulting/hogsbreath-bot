@@ -1,0 +1,37 @@
+name: Elbo Room Crowd Monitor
+
+on:
+  schedule:
+    # Every 15 minutes during bar hours (12 PM – 1 AM ET)
+    # EDT = UTC-4, EST = UTC-5; run 12:00–04:59 UTC to cover both offsets
+    - cron: '0,15,30,45 16,17,18,19,20,21,22,23,0,1,2,3,4 * * *'
+  workflow_dispatch:
+    inputs:
+      test:
+        description: 'Send test notification regardless of time/tier'
+        type: boolean
+        default: false
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          playwright install chromium --with-deps
+
+      - name: Run crowd monitor
+        env:
+          CROWD_DISCORD_WEBHOOK: ${{ secrets.CROWD_DISCORD_WEBHOOK }}
+          CI: 'true'
+        run: python crowd_monitor.py ${{ github.event.inputs.test == 'true' && '--test' || '' }}
