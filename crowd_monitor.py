@@ -79,19 +79,15 @@ def grab_frame():
     if os.path.exists(FRAME_PATH):
         os.remove(FRAME_PATH)
 
-    headless = os.environ.get("CI", "") != ""
-
     with sync_playwright() as p:
-        launch_kwargs = {
-            "headless": headless,
-            "args": [
+        browser = p.chromium.launch(
+            headless=False,
+            channel="chrome",
+            args=[
                 "--autoplay-policy=no-user-gesture-required",
                 "--mute-audio",
             ],
-        }
-        if not headless:
-            launch_kwargs["channel"] = "chrome"
-        browser = p.chromium.launch(**launch_kwargs)
+        )
         page = browser.new_page(viewport={"width": 1280, "height": 720})
         page.goto(YOUTUBE_URL, wait_until="domcontentloaded", timeout=30000)
         page.wait_for_timeout(8000)
