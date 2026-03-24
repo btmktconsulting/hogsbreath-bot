@@ -8,6 +8,11 @@ on:
     - cron: '29 20,21 * * *'   # 4:29 PM ET  (EDT=20:29, EST=21:29)
     - cron: '59 0,1 * * *'     # 8:59 PM ET  (EDT=00:59, EST=01:59)
   workflow_dispatch: # Allow manual trigger
+    inputs:
+      test:
+        description: 'Send test notification for first event'
+        type: boolean
+        default: false
 
 jobs:
   check:
@@ -28,4 +33,4 @@ jobs:
       - name: Check for upcoming performances
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
-        run: python main.py
+        run: python main.py ${{ github.event.inputs.test == 'true' && '--test' || '' }}

@@ -6,6 +6,7 @@ Runs as a GitHub Actions scheduled workflow at show times (12 PM, 4:30 PM, 9 PM 
 
 import os
 import re
+import sys
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -104,6 +105,7 @@ def send_discord_notification(event, next_event=None):
             f"\n\n➡️ **Up next:** {next_event['artist']} "
             f"at {next_event['start'].strftime('%I:%M %p')}"
         )
+    description += "\n\n📺 Watch now: https://www.floor1adv.com/live-stream/"
 
     payload = {
         "embeds": [
@@ -138,6 +140,13 @@ def main():
     print(f"[OK] Found {len(events)} event(s) today:")
     for e in events:
         print(f"     {e['artist']} — {e['start'].strftime('%I:%M %p')}")
+
+    # --test flag: send notification for the first event regardless of time
+    if "--test" in sys.argv:
+        print("[TEST] Sending test notification for first event")
+        next_event = events[1] if len(events) > 1 else None
+        send_discord_notification(events[0], next_event)
+        return
 
     # Find events starting within the next 5 minutes
     for i, event in enumerate(events):
