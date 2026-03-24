@@ -39,39 +39,23 @@ def grab_frame():
     if os.path.exists(FRAME_PATH):
         os.remove(FRAME_PATH)
 
+    # Use embed URL — auto-plays without consent dialogs
+    embed_url = YOUTUBE_URL.replace("watch?v=", "embed/") + "?autoplay=1&mute=1"
+
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
+        browser = p.chromium.launch(
+            headless=True,
+            args=["--autoplay-policy=no-user-gesture-required"],
+        )
         page = browser.new_page(viewport={"width": 1280, "height": 720})
 
-        # Navigate to the livestream
-        page.goto(YOUTUBE_URL, wait_until="domcontentloaded", timeout=30000)
+        page.goto(embed_url, wait_until="domcontentloaded", timeout=30000)
 
-        # Dismiss cookie/consent dialogs if present
-        try:
-            page.click("button[aria-label='Accept all']", timeout=3000)
-        except Exception:
-            pass
+        # Wait for video to load and start playing
+        page.wait_for_timeout(10000)
 
-        # Click the video to start playback and wait for it to load
-        try:
-            page.click("video", timeout=5000)
-        except Exception:
-            pass
-
-        # Wait for video to start playing
-        page.wait_for_timeout(8000)
-
-        # Screenshot just the video player area
-        video = page.query_selector("video")
-        if video:
-            video.screenshot(path=FRAME_PATH)
-        else:
-            # Fallback: screenshot the main player container
-            player = page.query_selector("#movie_player")
-            if player:
-                player.screenshot(path=FRAME_PATH)
-            else:
-                page.screenshot(path=FRAME_PATH)
+        # Take a full-page screenshot (the embed IS the video)
+        page.screenshot(path=FRAME_PATH)
 
         browser.close()
 
