@@ -16,7 +16,9 @@ URL = "https://www.hogsbreath.com/events/"
 WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL", "")
 TIMEZONE = ZoneInfo("America/New_York")
 
-HEADERS = {"User-Agent": "Mozilla/5.0"}
+HEADERS = {
+    "User-Agent": "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)"
+}
 
 MONTHS = {
     "Jan": 1, "Feb": 2, "Mar": 3, "Apr": 4, "May": 5, "Jun": 6,
