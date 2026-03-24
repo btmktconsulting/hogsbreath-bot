@@ -37,46 +37,34 @@ def is_bar_hours():
 
 def grab_frame():
     """Grab a single frame from the YouTube livestream."""
-    clip_path = "/tmp/bar_clip.ts"
+    if os.path.exists(FRAME_PATH):
+        os.remove(FRAME_PATH)
 
-    # Remove old files
-    for f in [FRAME_PATH, clip_path]:
-        if os.path.exists(f):
-            os.remove(f)
+    # Step 1: Get the direct stream URL from yt-dlp
+    result = subprocess.run(
+        ["yt-dlp", "-f", "best[height<=480]", "--get-url", YOUTUBE_URL],
+        capture_output=True, text=True, timeout=30,
+    )
+    stream_url = result.stdout.strip()
+    if not stream_url:
+        raise RuntimeError(f"Could not get stream URL: {result.stderr}")
+    print("[OK] Got stream URL")
 
-    # Download a ~2 second clip using yt-dlp (handles auth/signing internally)
+    # Step 2: Grab one frame with ffmpeg (timeout to prevent hanging on HLS)
     result = subprocess.run(
         [
-            "yt-dlp", "-f", "best[height<=480]",
-            "--downloader", "ffmpeg",
-            "--downloader-args", "ffmpeg:-t 3",
-            "-o", clip_path,
-            "--no-part",
-            YOUTUBE_URL,
-        ],
-        capture_output=True, text=True, timeout=60,
-    )
-    if not os.path.exists(clip_path) or os.path.getsize(clip_path) == 0:
-        raise RuntimeError(f"Could not download clip: {result.stderr}")
-
-    print(f"[OK] Downloaded clip: {os.path.getsize(clip_path)} bytes")
-
-    # Extract first frame from the downloaded clip
-    subprocess.run(
-        [
-            "ffmpeg", "-i", clip_path,
-            "-frames:v", "1", "-y", "-loglevel", "error",
+            "timeout", "30",
+            "ffmpeg", "-y",
+            "-i", stream_url,
+            "-frames:v", "1", "-q:v", "2",
+            "-loglevel", "error",
             FRAME_PATH,
         ],
-        capture_output=True, timeout=15,
+        capture_output=True, text=True, timeout=45,
     )
 
-    # Clean up clip
-    if os.path.exists(clip_path):
-        os.remove(clip_path)
-
-    if not os.path.exists(FRAME_PATH):
-        raise RuntimeError("Failed to extract frame from clip")
+    if not os.path.exists(FRAME_PATH) or os.path.getsize(FRAME_PATH) == 0:
+        raise RuntimeError(f"ffmpeg failed: {result.stderr}")
 
     print(f"[OK] Captured frame: {os.path.getsize(FRAME_PATH)} bytes")
 
