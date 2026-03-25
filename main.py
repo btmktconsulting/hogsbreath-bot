@@ -4,6 +4,7 @@ Scrapes the events page and sends a Discord alert ~1 minute before each performa
 Runs as a GitHub Actions scheduled workflow at show times (12 PM, 4:30 PM, 9 PM ET).
 """
 
+import json
 import os
 import re
 import sys
@@ -17,6 +18,7 @@ from bs4 import BeautifulSoup
 URL = "https://www.hogsbreath.com/events/"
 WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL", "")
 TIMEZONE = ZoneInfo("America/New_York")
+STATE_FILE = "notified_state.json"
 
 SCRAPER = cloudscraper.create_scraper()
 
@@ -148,15 +150,31 @@ def main():
         send_discord_notification(events[0], next_event)
         return
 
-    # Find events starting within the next 5 minutes
+    # Load state to avoid duplicate notifications
+    notified = set()
+    if os.path.exists(STATE_FILE):
+        try:
+            with open(STATE_FILE) as f:
+                state = json.load(f)
+            # Only use state from today
+            if state.get("date") == now.strftime("%Y-%m-%d"):
+                notified = set(state.get("notified", []))
+        except (json.JSONDecodeError, KeyError):
+            pass
+
+    # Find the next upcoming event (starts within 45 min) or just-started (up to 10 min ago)
     for i, event in enumerate(events):
         minutes_until = (event["start"] - now).total_seconds() / 60
-        if -1 <= minutes_until <= 5:
+        event_key = f"{event['artist']}|{event['start'].strftime('%H:%M')}"
+        if -10 <= minutes_until <= 45 and event_key not in notified:
             next_event = events[i + 1] if i + 1 < len(events) else None
             send_discord_notification(event, next_event)
+            notified.add(event_key)
+            with open(STATE_FILE, "w") as f:
+                json.dump({"date": now.strftime("%Y-%m-%d"), "notified": list(notified)}, f)
             return
 
-    print("[OK] No performances starting soon")
+    print("[OK] No performances starting soon (or already notified)")
 
 
 if __name__ == "__main__":

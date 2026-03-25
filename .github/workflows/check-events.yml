@@ -2,11 +2,12 @@ name: Check Hog's Breath Events
 
 on:
   schedule:
-    # 1 minute before each show slot (12 PM, 4:30 PM, 9 PM ET)
-    # Runs at both EDT and EST UTC offsets so it works year-round
-    - cron: '59 15,16 * * *'   # 11:59 AM ET (EDT=15:59, EST=16:59)
-    - cron: '29 20,21 * * *'   # 4:29 PM ET  (EDT=20:29, EST=21:29)
-    - cron: '59 0,1 * * *'     # 8:59 PM ET  (EDT=00:59, EST=01:59)
+    # Run every 15 min during show windows to handle GitHub Actions cron delays
+    # Show times: 12 PM, 4:30 PM, 9 PM ET
+    # Cover both EDT (UTC-4) and EST (UTC-5) offsets
+    - cron: '45,0,15,30 15,16 * * *'    # ~11:45 AM - 12:30 PM ET
+    - cron: '15,30,45,0 20,21 * * *'     # ~4:15 PM - 5:00 PM ET
+    - cron: '45,0,15,30 0,1 * * *'       # ~8:45 PM - 9:30 PM ET
   workflow_dispatch: # Allow manual trigger
     inputs:
       test:
@@ -21,6 +22,13 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+
+      - name: Restore notification state
+        uses: actions/cache@v4
+        with:
+          path: notified_state.json
+          key: notified-${{ github.run_id }}
+          restore-keys: notified-
 
       - name: Set up Python
         uses: actions/setup-python@v5
